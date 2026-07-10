@@ -38,6 +38,22 @@ def build_vertex_loop_map(obj):
     return vert_to_loops
 
 
+def srgb_to_linear(c):
+    """Convert a single sRGB channel value (0..1) to scene-linear."""
+    c = min(1.0, max(0.0, c))
+    if c <= 0.04045:
+        return c / 12.92
+    return ((c + 0.055) / 1.055) ** 2.4
+
+
+def linear_to_srgb(c):
+    """Convert a single scene-linear channel value (0..1) to sRGB."""
+    c = min(1.0, max(0.0, c))
+    if c <= 0.0031308:
+        return c * 12.92
+    return 1.055 * (c ** (1.0 / 2.4)) - 0.055
+
+
 def get_random_color_by_RGBA():
     """Returns a tuple with 4 floats (RGBA), each float is a random between 0 and 1."""
     return (random.random(), random.random(), random.random(), random.random())

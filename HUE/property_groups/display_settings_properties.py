@@ -23,8 +23,11 @@ class DisplaySettingsProperties(PropertyGroup):
         description="Determines how vertex colors will be presented",
         items=[
             ("Off", "Off", "Do not show vertex color."),
-            ("RGB", "RGB", "Show only RGB components of vertex colors."),
-            ("Alpha", "Alpha", "Show only alpha component of vertex colors."),
+            ("RGB", "RGB", "Show the full RGB vertex colors."),
+            ("R", "R", "Show only the Red channel as grayscale."),
+            ("G", "G", "Show only the Green channel as grayscale."),
+            ("B", "B", "Show only the Blue channel as grayscale."),
+            ("Alpha", "A", "Show only the Alpha channel as grayscale."),
         ],
         default="Off",
         update=on_settings_update,

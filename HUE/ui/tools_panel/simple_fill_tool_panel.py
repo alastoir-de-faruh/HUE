@@ -25,8 +25,12 @@ class HUE_PT_simple_fill_tool_panel(BasePanelInfo, Panel):
         # --- Active color + apply button ---
         box = layout.box()
         box.label(text="Active Color", icon="BRUSH_DATA")
+        box.prop(tool, "color_space", expand=True)
         row = box.row(align=True)
-        row.prop(tool, "selected_color", text="")
+        if tool.color_space == "LINEAR":
+            row.prop(tool, "selected_color_linear", text="")
+        else:
+            row.prop(tool, "selected_color", text="")
         row.operator("hue.simple_fill", icon="CHECKMARK")
 
         layout.separator()

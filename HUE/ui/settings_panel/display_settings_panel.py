@@ -24,5 +24,5 @@ class HUE_PT_display_settings_panel(BasePanelInfo, Panel):
         row.enabled = has_mesh
         row.prop(display_settings, "display_mode", expand=True)
 
-        if has_mesh and display_settings.display_mode == "Alpha":
-            layout.label(text="Alpha mode overrides active object materials.", icon="INFO")
+        if has_mesh and display_settings.display_mode in {"R", "G", "B", "Alpha"}:
+            layout.label(text="Channel mode overrides active object materials.", icon="INFO")
