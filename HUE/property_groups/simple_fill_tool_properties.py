@@ -9,59 +9,54 @@ from bpy.props import (
 )
 from bpy.types import PropertyGroup
 
-from ..utilities.color_utilities import linear_to_srgb, srgb_to_linear
-
-# Guard against the two color properties triggering each other's update
-# callbacks in an infinite loop while we keep them in sync.
+# The sRGB/Linear switch is a *view* aid only: both color properties hold the
+# exact same numbers. The switch merely changes how those numbers are shown —
+# a COLOR_GAMMA widget reads them as sRGB, a COLOR widget reads them as
+# scene-linear — so the artist can inspect the same triple in either space.
+# The stored value, and therefore the color applied to the mesh, never changes.
+#
+# Guard against the two properties triggering each other's update callbacks in
+# an infinite loop while we mirror them.
 _syncing = False
 
 
-def _sync_from_srgb(self, context):
-    """Mirror the sRGB picker value into the linear picker."""
+def _mirror(self, src_attr, dst_attr):
+    """Copy one color property onto the other verbatim (no gamma math).
+
+    Both properties always hold identical numbers; only the widget subtype
+    used to display them differs.
+    """
     global _syncing
     if _syncing:
         return
     _syncing = True
     try:
-        src = self.selected_color
-        self.selected_color_linear = (
-            srgb_to_linear(src[0]),
-            srgb_to_linear(src[1]),
-            srgb_to_linear(src[2]),
-            src[3],  # alpha is not gamma-corrected
-        )
+        setattr(self, dst_attr, tuple(getattr(self, src_attr)))
     finally:
         _syncing = False
+
+
+def _sync_from_srgb(self, context):
+    """Keep the linear-view property in step with the sRGB-view property."""
+    _mirror(self, "selected_color", "selected_color_linear")
 
 
 def _sync_from_linear(self, context):
-    """Mirror the linear picker value into the sRGB picker."""
-    global _syncing
-    if _syncing:
-        return
-    _syncing = True
-    try:
-        src = self.selected_color_linear
-        self.selected_color = (
-            linear_to_srgb(src[0]),
-            linear_to_srgb(src[1]),
-            linear_to_srgb(src[2]),
-            src[3],  # alpha is not gamma-corrected
-        )
-    finally:
-        _syncing = False
+    """Keep the sRGB-view property in step with the linear-view property."""
+    _mirror(self, "selected_color_linear", "selected_color")
 
 
 class SimpleFillToolProperties(PropertyGroup):
     color_space: EnumProperty(
         name="Color Space",
         description=(
-            "Choose whether the numeric color fields are shown in sRGB or "
-            "Linear space. The resulting fill color is identical either way"
+            "How the active color and palette swatches are displayed. This is "
+            "a view aid only — it changes neither the stored color nor the "
+            "color applied to the mesh"
         ),
         items=[
-            ("sRGB", "sRGB", "Enter and view color values in sRGB (gamma) space"),
-            ("LINEAR", "Linear", "Enter and view color values in Linear RGB space"),
+            ("sRGB", "sRGB", "Show the values interpreted as sRGB (gamma) space"),
+            ("LINEAR", "Linear", "Show the same values interpreted as Linear RGB"),
         ],
         default="sRGB",
     )

@@ -51,6 +51,9 @@ class HUE_PT_random_color_tool_panel(BasePanelInfo, Panel):
 
         if random_color_tool.color_mode == "Palette":
             ensure_palette_assigned(random_color_tool, "random_palette")
+            # Swatches follow the Fill tool's color-space view aid so palettes
+            # read consistently across the whole HUE editor.
+            color_space = context.scene.hue_simple_fill_tool.color_space
             box = layout.box()
             box.label(text="Palette", icon="COLOR")
             row = box.row(align=True)
@@ -62,7 +65,7 @@ class HUE_PT_random_color_tool_panel(BasePanelInfo, Panel):
                     if i % SWATCH_COLS == 0:
                         row = box.row(align=True)
                         row.alignment = 'LEFT'
-                    icon_id = get_color_icon(*pc.color)
+                    icon_id = get_color_icon(*pc.color, color_space=color_space)
                     row.label(text="", icon_value=icon_id)
 
         row = layout.row()

@@ -55,7 +55,7 @@ class HUE_PT_simple_fill_tool_panel(BasePanelInfo, Panel):
                 if i % SWATCH_COLS == 0:
                     row = box.row(align=True)
                     row.alignment = 'LEFT'
-                icon_id = get_color_icon(*pc.color)
+                icon_id = get_color_icon(*pc.color, color_space=tool.color_space)
                 op = row.operator(
                     "hue.use_preset_color",
                     text="",

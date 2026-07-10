@@ -34,11 +34,21 @@ def _linear_to_srgb(c):
     return 1.055 * (c ** (1.0 / 2.4)) - 0.055
 
 
-def get_color_icon(r, g, b):
-    """Get or create a colored swatch icon, fully in-memory."""
+def get_color_icon(r, g, b, color_space="sRGB"):
+    """Get or create a colored swatch icon, fully in-memory.
+
+    *color_space* selects how the stored RGB numbers are rendered. "sRGB"
+    shows them directly (they are display-referred already); "LINEAR" treats
+    them as scene-linear and applies the linear->sRGB transform, matching how
+    a Linear color widget shows the same numbers. Display only — the stored
+    palette color is never modified.
+    """
     if "main" not in _preset_previews:
         _preset_previews["main"] = bpy.utils.previews.new()
     pcoll = _preset_previews["main"]
+
+    if color_space == "LINEAR":
+        r, g, b = _linear_to_srgb(r), _linear_to_srgb(g), _linear_to_srgb(b)
 
     ri, gi, bi = int(r * 255), int(g * 255), int(b * 255)
     key = f"hue_{ri:03d}_{gi:03d}_{bi:03d}"
