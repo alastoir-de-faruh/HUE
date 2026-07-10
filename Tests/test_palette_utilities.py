@@ -27,7 +27,6 @@ from utilities.palette_utilities import (
     _linear_to_srgb,
     cleanup_previews,
     get_color_icon,
-    get_or_create_default_palette,
 )
 
 
@@ -60,40 +59,12 @@ class TestLinearToSrgb(unittest.TestCase):
             prev = curr
 
 
-class TestGetOrCreateDefaultPalette(unittest.TestCase):
-    def setUp(self):
-        # Remove existing palette if present
-        existing = bpy.data.palettes.get(DEFAULT_PALETTE_NAME)
-        if existing:
-            bpy.data.palettes.remove(existing)
+class TestDefaultPaletteName(unittest.TestCase):
+    """The persistent palette library seeds a palette with this name."""
 
-    def tearDown(self):
-        existing = bpy.data.palettes.get(DEFAULT_PALETTE_NAME)
-        if existing:
-            bpy.data.palettes.remove(existing)
-
-    def test_creates_palette(self):
-        palette = get_or_create_default_palette()
-        self.assertIsNotNone(palette)
-        self.assertEqual(palette.name, DEFAULT_PALETTE_NAME)
-
-    def test_palette_has_colors(self):
-        palette = get_or_create_default_palette()
-        self.assertGreater(len(palette.colors), 0)
-
-    def test_returns_same_palette_on_second_call(self):
-        p1 = get_or_create_default_palette()
-        p2 = get_or_create_default_palette()
-        self.assertEqual(p1.name, p2.name)
-        # Should not have duplicated colors
-        self.assertEqual(len(p1.colors), len(p2.colors))
-
-    def test_default_colors_are_valid_rgb(self):
-        palette = get_or_create_default_palette()
-        for pc in palette.colors:
-            for ch in range(3):
-                self.assertGreaterEqual(pc.color[ch], 0.0)
-                self.assertLessEqual(pc.color[ch], 1.0)
+    def test_name_is_non_empty_string(self):
+        self.assertIsInstance(DEFAULT_PALETTE_NAME, str)
+        self.assertTrue(DEFAULT_PALETTE_NAME)
 
 
 class TestGetColorIcon(unittest.TestCase):
@@ -113,6 +84,12 @@ class TestGetColorIcon(unittest.TestCase):
         # Should not crash with out-of-range linear values
         icon_id = get_color_icon(2.0, -0.5, 0.5)
         self.assertIsInstance(icon_id, int)
+
+    def test_linear_space_differs_from_srgb(self):
+        # The color-space view aid should render a mid value differently.
+        srgb_id = get_color_icon(0.5, 0.5, 0.5, color_space="sRGB")
+        linear_id = get_color_icon(0.5, 0.5, 0.5, color_space="LINEAR")
+        self.assertNotEqual(srgb_id, linear_id)
 
 
 if __name__ == "__main__":

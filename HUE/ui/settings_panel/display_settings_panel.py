@@ -25,4 +25,4 @@ class HUE_PT_display_settings_panel(BasePanelInfo, Panel):
         row.prop(display_settings, "display_mode", expand=True)
 
         if has_mesh and display_settings.display_mode in {"R", "G", "B", "Alpha"}:
-            layout.label(text="Channel mode overrides active object materials.", icon="INFO")
+            layout.label(text="Channel mode shows a temporary grayscale preview.", icon="INFO")

@@ -13,7 +13,22 @@ from ..utilities.color_utilities import (
     ensure_object_mode, get_active_color_attribute, get_distinct_random_colors,
     get_random_color, get_selected_color_indices,
 )
-from .base_operators import BaseColorOperator
+from ..utilities.palette_utilities import get_prefs
+from .base_operators import BaseColorOperator, BaseOperator
+
+
+def _get_random_palette_colors(random_color_tool):
+    """Return the selected library palette's swatches as RGBA tuples, or None."""
+    prefs = get_prefs()
+    if prefs is None:
+        return None
+    idx = random_color_tool.random_palette_index
+    if not (0 <= idx < len(prefs.palettes)):
+        return None
+    pal = prefs.palettes[idx]
+    if len(pal.swatches) == 0:
+        return None
+    return [tuple(sw.color) for sw in pal.swatches]
 
 
 class HUE_OT_add_random_color(BaseColorOperator):
@@ -192,10 +207,10 @@ class HUE_OT_add_random_color(BaseColorOperator):
 
         palette = None
         if self.color_mode == "Palette":
-            if not random_color_tool.random_palette or len(random_color_tool.random_palette.colors) == 0:
+            palette = _get_random_palette_colors(random_color_tool)
+            if palette is None:
                 self.report({"ERROR"}, "Palette is empty. Add colors to the palette first.")
                 return {"CANCELLED"}
-            palette = [(*pc.color, 1.0) for pc in random_color_tool.random_palette.colors]
 
         mesh_objects = [obj for obj in context.selected_objects if obj.type == "MESH"]
 
@@ -288,11 +303,7 @@ class HUE_OT_add_random_color_by_object(BaseColorOperator):
         random_color_tool = scene.hue_random_color_tool
         global_color_settings = scene.hue_global_color_settings
 
-        palette = None
-        if random_color_tool.random_palette and len(random_color_tool.random_palette.colors) > 0:
-            palette = [
-                (*pc.color, 1.0) for pc in random_color_tool.random_palette.colors
-            ]
+        palette = _get_random_palette_colors(random_color_tool)
 
         mesh_objects = [obj for obj in context.selected_objects if obj.type == "MESH"]
 
@@ -310,4 +321,21 @@ class HUE_OT_add_random_color_by_object(BaseColorOperator):
                 obj.data.update()
 
         self.report({"INFO"}, "Random color per object applied!")
+        return {"FINISHED"}
+
+
+class HUE_OT_select_random_palette(BaseOperator):
+    """Selects this palette as the source for random colors"""
+
+    bl_label = "Select Palette"
+    bl_idname = "hue.select_random_palette"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    index: IntProperty()
+
+    def execute(self, context):
+        prefs = get_prefs()
+        if prefs is None or not (0 <= self.index < len(prefs.palettes)):
+            return {"CANCELLED"}
+        context.scene.hue_random_color_tool.random_palette_index = self.index
         return {"FINISHED"}

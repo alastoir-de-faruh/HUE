@@ -3,12 +3,33 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-from bpy.types import Panel
+from bpy.types import Menu, Panel
 
 from ..base_panel_info import BasePanelInfo
 from ...utilities.palette_utilities import (
-    SWATCH_COLS, ensure_palette_assigned, get_color_icon,
+    SWATCH_COLS, get_active_fill_palette, get_color_icon, get_prefs,
 )
+
+
+class HUE_MT_fill_palette_select(Menu):
+    """Dropdown listing every palette in the persistent library."""
+
+    bl_idname = "HUE_MT_fill_palette_select"
+    bl_label = "Select Palette"
+
+    def draw(self, context):
+        layout = self.layout
+        prefs = get_prefs()
+        if prefs is None or len(prefs.palettes) == 0:
+            layout.label(text="No palettes")
+            return
+        for i, pal in enumerate(prefs.palettes):
+            op = layout.operator(
+                "hue.select_palette",
+                text=f"{pal.name}  [{pal.mask_label()}]",
+                icon="COLOR",
+            )
+            op.index = i
 
 
 class HUE_PT_simple_fill_tool_panel(BasePanelInfo, Panel):
@@ -20,7 +41,6 @@ class HUE_PT_simple_fill_tool_panel(BasePanelInfo, Panel):
     def draw(self, context):
         layout = self.layout
         tool = context.scene.hue_simple_fill_tool
-        ensure_palette_assigned(tool, "preset_palette")
 
         # --- Active color + apply button ---
         box = layout.box()
@@ -35,37 +55,50 @@ class HUE_PT_simple_fill_tool_panel(BasePanelInfo, Panel):
 
         layout.separator()
 
-        # --- Palette selector ---
+        # --- Palette library ---
+        pal = get_active_fill_palette(context.scene)
         box = layout.box()
         header_row = box.row(align=False)
         header_row.label(text="Color Presets", icon="COLOR")
         header_row.prop(tool, "quick_fill", text="Quick Fill", toggle=True, icon="PLAY")
+
         row = box.row(align=True)
-        row.prop(tool, "preset_palette", text="")
+        label = f"{pal.name}  [{pal.mask_label()}]" if pal else "No palette"
+        row.menu("HUE_MT_fill_palette_select", text=label, icon="COLOR")
         row.operator("hue.new_palette", icon="FILE_NEW", text="")
-        if tool.preset_palette:
+        if pal:
             row.operator("hue.rename_palette", icon="GREASEPENCIL", text="")
             row.operator("hue.delete_palette", icon="TRASH", text="")
 
-        # --- Swatch grid ---
-        palette = tool.preset_palette
-        if palette and len(palette.colors) > 0:
-            active_idx = tool.active_preset_index
-            for i, pc in enumerate(palette.colors):
-                if i % SWATCH_COLS == 0:
-                    row = box.row(align=True)
-                    row.alignment = 'LEFT'
-                icon_id = get_color_icon(*pc.color, color_space=tool.color_space)
-                op = row.operator(
-                    "hue.use_preset_color",
-                    text="",
-                    icon_value=icon_id,
-                    depress=(i == active_idx),
-                )
-                op.index = i
+        if pal:
+            # Per-palette channel mask (paired with the palette; applied on select)
+            mrow = box.row(align=True)
+            mrow.label(text="Mask")
+            mrow.prop(pal, "mask_r", toggle=True)
+            mrow.prop(pal, "mask_g", toggle=True)
+            mrow.prop(pal, "mask_b", toggle=True)
+            mrow.prop(pal, "mask_a", toggle=True)
 
-        # --- Add / Remove buttons ---
-        row = box.row(align=True)
-        row.operator("hue.add_preset_color", icon="ADD", text="")
-        if palette and len(palette.colors) > 0:
-            row.operator("hue.remove_preset_color", icon="REMOVE", text="")
+            # --- Swatch grid ---
+            if len(pal.swatches) > 0:
+                active_idx = pal.active_swatch_index
+                for i, sw in enumerate(pal.swatches):
+                    if i % SWATCH_COLS == 0:
+                        row = box.row(align=True)
+                        row.alignment = 'LEFT'
+                    icon_id = get_color_icon(*sw.color[:3], color_space=tool.color_space)
+                    op = row.operator(
+                        "hue.use_preset_color",
+                        text="",
+                        icon_value=icon_id,
+                        depress=(i == active_idx),
+                    )
+                    op.index = i
+
+            # --- Add / Remove buttons ---
+            row = box.row(align=True)
+            row.operator("hue.add_preset_color", icon="ADD", text="")
+            if len(pal.swatches) > 0:
+                row.operator("hue.remove_preset_color", icon="REMOVE", text="")
+                op = row.operator("hue.edit_swatch_description", icon="TEXT", text="")
+                op.index = pal.active_swatch_index

@@ -3,8 +3,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-import bpy
-from bpy.props import EnumProperty, PointerProperty
+from bpy.props import EnumProperty, IntProperty
 from bpy.types import PropertyGroup
 
 
@@ -35,8 +34,8 @@ class RandomColorToolProperties(PropertyGroup):
         ]
     )
 
-    random_palette: PointerProperty(
-        type=bpy.types.Palette,
+    random_palette_index: IntProperty(
         name="Palette",
-        description="Palette to randomly pick colors from",
+        description="Index into the persistent palette library to pick colors from",
+        default=0,
     )

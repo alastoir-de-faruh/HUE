@@ -25,6 +25,7 @@ classes = [
 
     add_random_color.HUE_OT_add_random_color,
     add_random_color.HUE_OT_add_random_color_by_object,
+    add_random_color.HUE_OT_select_random_palette,
     open_documentation.HUE_OT_open_documentation,
     open_documentation.HUE_OT_open_bug_report,
     open_documentation.HUE_OT_open_review,
@@ -39,6 +40,8 @@ classes = [
     simple_fill.HUE_OT_new_palette,
     simple_fill.HUE_OT_rename_palette,
     simple_fill.HUE_OT_delete_palette,
+    simple_fill.HUE_OT_select_palette,
+    simple_fill.HUE_OT_edit_swatch_description,
     simple_fill.HUE_OT_use_preset_color,
 
     smooth_vertex_colors.HUE_OT_smooth_vertex_colors,
@@ -56,8 +59,10 @@ classes = [
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+    display_vertex_colors.add_depsgraph_handler()
 
 
 def unregister():
+    display_vertex_colors.remove_depsgraph_handler()
     for cls in classes:
         bpy.utils.unregister_class(cls)

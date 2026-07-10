@@ -3,11 +3,29 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-import bpy
 from bpy.props import (
-    BoolProperty, EnumProperty, FloatVectorProperty, IntProperty, PointerProperty,
+    BoolProperty, EnumProperty, FloatVectorProperty, IntProperty,
 )
 from bpy.types import PropertyGroup
+
+
+def _on_palette_selected(self, context):
+    """Apply the newly selected palette's channel mask to the scene mask."""
+    scene = getattr(context, "scene", None)
+    if scene is None:
+        return
+    gcs = getattr(scene, "hue_global_color_settings", None)
+    if gcs is None:
+        return
+    from ..utilities.palette_utilities import get_active_fill_palette
+    pal = get_active_fill_palette(scene)
+    if pal is None:
+        return
+    gcs.global_color_mask_r = pal.mask_r
+    gcs.global_color_mask_g = pal.mask_g
+    gcs.global_color_mask_b = pal.mask_b
+    gcs.global_color_mask_a = pal.mask_a
+
 
 # The sRGB/Linear switch is a *view* aid only: both color properties hold the
 # exact same numbers. The switch merely changes how those numbers are shown —
@@ -83,15 +101,11 @@ class SimpleFillToolProperties(PropertyGroup):
         update=_sync_from_linear,
     )
 
-    preset_palette: PointerProperty(
-        type=bpy.types.Palette,
-        name="Preset Palette",
-        description="Palette of saved color presets",
-    )
-
-    active_preset_index: IntProperty(
-        name="Active Preset Index",
+    active_palette_index: IntProperty(
+        name="Active Palette",
+        description="Index into the persistent palette library",
         default=0,
+        update=_on_palette_selected,
     )
 
     quick_fill: BoolProperty(

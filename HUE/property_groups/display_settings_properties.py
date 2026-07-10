@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-from bpy.props import EnumProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, StringProperty
 from bpy.types import PropertyGroup
 
 
@@ -17,6 +17,9 @@ class DisplaySettingsProperties(PropertyGroup):
     previous_shading_type: StringProperty(name="Previous Shading Type", default="SOLID")
     previous_color_type: StringProperty(name="Previous Color Type", default="OBJECT")
     previous_light_type: StringProperty(name="Previous Light Type", default="STUDIO")
+
+    # True while a HUE display mode is active (shading has been saved).
+    display_active: BoolProperty(name="Display Active", default=False)
 
     display_mode: EnumProperty(
         name="Vertex Colors Display Mode",
@@ -33,7 +36,11 @@ class DisplaySettingsProperties(PropertyGroup):
         update=on_settings_update,
     )
 
-    alpha_display_material_name: StringProperty(
-        name="Alpha Display Material Name",
-        default="HUE_VertexColorAlphaDisplay",
+    # Channel preview state (grayscale channel shown via a temporary render
+    # color attribute — no material reassignment).
+    channel_preview_attr: StringProperty(
+        name="Channel Preview Attribute",
+        default="HUE_ChannelPreview",
     )
+    channel_preview_source: StringProperty(name="Channel Preview Source", default="")
+    channel_preview_object: StringProperty(name="Channel Preview Object", default="")
