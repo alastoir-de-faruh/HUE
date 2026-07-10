@@ -164,8 +164,11 @@ def _setup_channel_preview(context, channel):
 
     _sync_cache[obj.name] = _write_channel(temp, source, channel)
 
-    # Keep the user's attribute active for editing; display the temp attribute.
-    _set_active_color(color_attributes, source)
+    # Solid shading displays the *active* color attribute, so the temp grayscale
+    # attribute must be the active one. HUE tools are redirected back to the real
+    # source by get_active_color_attribute(), so edits still land on the source
+    # and the depsgraph handler keeps this preview live.
+    _set_active_color(color_attributes, temp)
     _set_render_color(color_attributes, temp)
 
 

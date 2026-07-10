@@ -71,8 +71,12 @@ def get_color_icon(r, g, b, color_space="sRGB"):
 
 
 def _addon_package():
-    """Root add-on package name (e.g. "HUE"), used as the preferences key."""
-    return __package__.split(".")[0]
+    """Root add-on package, used as the preferences key.
+
+    This module lives in ``<root>.utilities``, so strip the last segment. As an
+    installed extension the root is e.g. ``bl_ext.user_default.more_colors``.
+    """
+    return __package__.rsplit(".", 1)[0]
 
 
 def get_prefs():

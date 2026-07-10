@@ -85,8 +85,23 @@ def get_active_color_attribute(obj):
     """
     Gets the active color attribute of *obj*.
     Creates a default FLOAT_COLOR/CORNER attribute if none exists.
+
+    While a HUE channel preview is showing its temporary grayscale attribute as
+    the active one, this redirects to the real source attribute so edits are not
+    lost when the preview is turned off.
     """
     color_attribute = obj.data.color_attributes.active_color
+
+    try:
+        settings = bpy.context.scene.hue_display_settings
+        if (color_attribute is not None
+                and color_attribute.name == settings.channel_preview_attr
+                and settings.channel_preview_object == obj.name):
+            source = obj.data.color_attributes.get(settings.channel_preview_source)
+            if source is not None:
+                return source
+    except AttributeError:
+        pass
 
     if color_attribute is None:
         color_attribute = obj.data.color_attributes.new(
