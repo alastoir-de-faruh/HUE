@@ -30,51 +30,67 @@ _SHORTCUT_OPERATORS = [
 
 
 # ---------------------------------------------------------------------------
-# Default palette color item
+# Persistent palette library
 # ---------------------------------------------------------------------------
+#
+# Palettes live in the add-on preferences so they persist across sessions and
+# are shared by every .blend file. Each palette pairs a set of swatches with a
+# channel mask (R/G/B/A); selecting a palette applies that mask to the fill.
 
-class DefaultPaletteColor(PropertyGroup):
+_MASK_LABELS = ("R", "G", "B", "A")
+
+
+def _sync_active_palette_mask(self, context):
+    """Mirror this palette's mask onto the scene mask when it is the active one.
+
+    The panel only exposes the active palette's mask toggles, so an edit here
+    means the user is changing the palette that is currently driving the fill.
+    """
+    scene = getattr(context, "scene", None)
+    if scene is None:
+        return
+    gcs = getattr(scene, "hue_global_color_settings", None)
+    if gcs is None:
+        return
+    from .utilities.palette_utilities import get_active_fill_palette
+    active = get_active_fill_palette(scene)
+    if active is None or active.as_pointer() != self.as_pointer():
+        return
+    gcs.global_color_mask_r = self.mask_r
+    gcs.global_color_mask_g = self.mask_g
+    gcs.global_color_mask_b = self.mask_b
+    gcs.global_color_mask_a = self.mask_a
+
+
+class HUEPaletteSwatch(PropertyGroup):
     color: FloatVectorProperty(
         name="Color",
         subtype="COLOR_GAMMA",
-        default=(1.0, 1.0, 1.0),
+        default=(1.0, 1.0, 1.0, 1.0),
         min=0.0,
         max=1.0,
-        size=3,
+        size=4,
+    )
+    description: StringProperty(
+        name="Description",
+        description="Note shown when hovering this swatch",
+        default="",
     )
 
 
-# ---------------------------------------------------------------------------
-# Palette edit operators
-# ---------------------------------------------------------------------------
+class HUEPalette(PropertyGroup):
+    name: StringProperty(name="Name", default="Palette")
+    mask_r: BoolProperty(name="R", description="Use Red channel", default=True, update=_sync_active_palette_mask)
+    mask_g: BoolProperty(name="G", description="Use Green channel", default=True, update=_sync_active_palette_mask)
+    mask_b: BoolProperty(name="B", description="Use Blue channel", default=True, update=_sync_active_palette_mask)
+    mask_a: BoolProperty(name="A", description="Use Alpha channel", default=True, update=_sync_active_palette_mask)
+    swatches: CollectionProperty(type=HUEPaletteSwatch)
+    active_swatch_index: IntProperty(name="Active Swatch", default=0)
 
-class HUE_OT_add_default_palette_color(bpy.types.Operator):
-    """Add a color to the default palette in preferences"""
-
-    bl_label = "Add Default Palette Color"
-    bl_idname = "hue.add_default_palette_color"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    def execute(self, context):
-        prefs = context.preferences.addons[__package__].preferences
-        item = prefs.default_palette_colors.add()
-        item.color = (1.0, 1.0, 1.0)
-        return {"FINISHED"}
-
-
-class HUE_OT_remove_default_palette_color(bpy.types.Operator):
-    """Remove the last color from the default palette in preferences"""
-
-    bl_label = "Remove Default Palette Color"
-    bl_idname = "hue.remove_default_palette_color"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    def execute(self, context):
-        prefs = context.preferences.addons[__package__].preferences
-        colors = prefs.default_palette_colors
-        if len(colors) > 0:
-            colors.remove(len(colors) - 1)
-        return {"FINISHED"}
+    def mask_label(self):
+        """Return a compact mask label like "R", "RG" or "RGBA"."""
+        flags = (self.mask_r, self.mask_g, self.mask_b, self.mask_a)
+        return "".join(l for l, on in zip(_MASK_LABELS, flags) if on) or "-"
 
 
 # ---------------------------------------------------------------------------
@@ -458,8 +474,8 @@ class HUEPreferences(AddonPreferences):
     default_mask_b: BoolProperty(name="B", default=True)
     default_mask_a: BoolProperty(name="A", default=True)
 
-    # -- Default palette --
-    default_palette_colors: CollectionProperty(type=DefaultPaletteColor)
+    # -- Persistent palette library --
+    palettes: CollectionProperty(type=HUEPalette)
 
     # -----------------------------------------------------------------------
     # Draw
@@ -484,21 +500,22 @@ class HUEPreferences(AddonPreferences):
                 row.prop(self, "default_mask_b", toggle=True)
                 row.prop(self, "default_mask_a", toggle=True)
 
-            self._draw_section_header(layout, "show_palette", "PALETTE", "Default Palette")
+            self._draw_section_header(layout, "show_palette", "PALETTE", "Palette Library")
             if self.show_palette:
                 box = layout.box()
-                colors = self.default_palette_colors
-                if len(colors) > 0:
-                    for i, pc in enumerate(colors):
-                        if i % SWATCH_COLS == 0:
-                            row = box.row(align=True)
-                            row.alignment = 'LEFT'
-                        icon_id = get_color_icon(*pc.color)
-                        row.prop(pc, "color", text="", icon_value=icon_id)
-                row = box.row(align=True)
-                row.operator("hue.add_default_palette_color", icon="ADD", text="")
-                if len(colors) > 0:
-                    row.operator("hue.remove_default_palette_color", icon="REMOVE", text="")
+                if len(self.palettes) == 0:
+                    box.label(text="No palettes yet.", icon="INFO")
+                for pal in self.palettes:
+                    row = box.row(align=True)
+                    row.label(text=f"{pal.name}  [{pal.mask_label()}]", icon="COLOR")
+                    swrow = row.row(align=True)
+                    swrow.alignment = 'RIGHT'
+                    for sw in pal.swatches[:SWATCH_COLS]:
+                        swrow.label(text="", icon_value=get_color_icon(*sw.color[:3]))
+                box.label(
+                    text="Palettes are stored globally and edited in the HUE side panel.",
+                    icon="INFO",
+                )
 
             layout.separator(factor=0.5)
             layout.operator("hue.show_keybinds", text="Keyboard Shortcuts", icon="QUESTION")
@@ -668,30 +685,14 @@ def _apply_startup_defaults(_=None):
         mask_tool.global_color_mask_a = prefs.default_mask_a
 
 
-def get_default_palette_colors():
-    """Return the list of default palette colors from preferences.
-
-    Falls back to hardcoded defaults if preferences aren't available or empty.
-    """
-    try:
-        prefs = bpy.context.preferences.addons[__package__].preferences
-        colors = prefs.default_palette_colors
-        if len(colors) > 0:
-            return [tuple(pc.color) for pc in colors]
-    except KeyError:
-        pass
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
 
 classes = [
-    DefaultPaletteColor,
+    HUEPaletteSwatch,
+    HUEPalette,
     ShortcutEntry,
-    HUE_OT_add_default_palette_color,
-    HUE_OT_remove_default_palette_color,
     HUE_OT_show_keybinds,
     HUE_OT_visibility_warning,
     HUEPreferences,
@@ -699,16 +700,18 @@ classes = [
 
 
 def _populate_default_palette():
-    """Populate the default palette CollectionProperty if it's empty (first install)."""
+    """Seed a default palette in preferences if the library is empty (first install)."""
     try:
         prefs = bpy.context.preferences.addons[__package__].preferences
     except KeyError:
         return
-    if len(prefs.default_palette_colors) == 0:
-        from .utilities.palette_utilities import _DEFAULT_COLORS
+    if len(prefs.palettes) == 0:
+        from .utilities.palette_utilities import _DEFAULT_COLORS, DEFAULT_PALETTE_NAME
+        pal = prefs.palettes.add()
+        pal.name = DEFAULT_PALETTE_NAME
         for color in _DEFAULT_COLORS:
-            item = prefs.default_palette_colors.add()
-            item.color = color
+            sw = pal.swatches.add()
+            sw.color = (color[0], color[1], color[2], 1.0)
 
 
 def register():

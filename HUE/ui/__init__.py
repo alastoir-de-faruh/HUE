@@ -26,6 +26,10 @@ from .tools_panel import (
 )
 
 classes = [
+    # Menus
+    simple_fill_tool_panel.HUE_MT_fill_palette_select,
+    random_color_tool_panel.HUE_MT_random_palette_select,
+
     # Parent panels first (children reference these via bl_parent_id)
     display_settings_panel.HUE_PT_display_settings_panel,
     tools_panel.HUE_PT_tools_panel,
@@ -47,12 +51,28 @@ classes = [
 ]
 
 
+def _swatch_context_menu(self, context):
+    """Add an "Edit Swatch Description" entry when right-clicking a swatch."""
+    op = getattr(context, "button_operator", None)
+    if op is None or op.bl_rna.identifier != "HUE_OT_use_preset_color":
+        return
+    layout = self.layout
+    layout.separator()
+    props = layout.operator(
+        "hue.edit_swatch_description", text="Edit Swatch Description", icon="TEXT"
+    )
+    props.index = op.index
+
+
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+    bpy.types.UI_MT_button_context_menu.append(_swatch_context_menu)
 
 
 def unregister():
+    bpy.types.UI_MT_button_context_menu.remove(_swatch_context_menu)
+
     for cls in classes:
         bpy.utils.unregister_class(cls)
 

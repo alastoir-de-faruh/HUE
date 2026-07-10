@@ -62,40 +62,47 @@ def get_color_icon(r, g, b, color_space="sRGB"):
     return pcoll[key].icon_id
 
 
-def get_or_create_default_palette():
-    """Get the shared default palette, creating it if it doesn't exist."""
-    palette = bpy.data.palettes.get(DEFAULT_PALETTE_NAME)
-    if not palette:
-        palette = bpy.data.palettes.new(DEFAULT_PALETTE_NAME)
-        # Try to read colors from preferences
-        prefs_colors = None
-        try:
-            from ..preferences import get_default_palette_colors
-            prefs_colors = get_default_palette_colors()
-        except (ImportError, KeyError):
-            pass
-        colors = prefs_colors if prefs_colors else _DEFAULT_COLORS
-        for color in colors:
-            pc = palette.colors.new()
-            pc.color = color
-    return palette
+# ---------------------------------------------------------------------------
+# Persistent palette library access
+# ---------------------------------------------------------------------------
+#
+# Palettes are stored on the add-on preferences (see preferences.HUEPalette),
+# so they persist across sessions and are shared by every .blend file.
 
 
-def ensure_palette_assigned(tool, attr_name):
-    """If the palette property on *tool* is unset, assign the shared default.
+def _addon_package():
+    """Root add-on package, used as the preferences key.
 
-    Safe to call from draw() — uses a deferred timer so it never
-    writes to ID data inside a restricted context.
+    This module lives in ``<root>.utilities``, so strip the last segment. As an
+    installed extension the root is e.g. ``bl_ext.user_default.more_colors``.
     """
-    if getattr(tool, attr_name):
-        return
+    return __package__.rsplit(".", 1)[0]
 
-    def _deferred():
-        if not getattr(tool, attr_name):
-            setattr(tool, attr_name, get_or_create_default_palette())
-        return None  # Don't repeat
 
-    bpy.app.timers.register(_deferred, first_interval=0)
+def get_prefs():
+    """Return the add-on preferences, or None if unavailable."""
+    try:
+        return bpy.context.preferences.addons[_addon_package()].preferences
+    except (KeyError, AttributeError):
+        return None
+
+
+def get_palettes():
+    """Return the persistent palette collection, or None."""
+    prefs = get_prefs()
+    return prefs.palettes if prefs is not None else None
+
+
+def get_active_fill_palette(scene):
+    """Return the palette currently selected by the Fill tool, or None."""
+    prefs = get_prefs()
+    if prefs is None or len(prefs.palettes) == 0:
+        return None
+    fill = getattr(scene, "hue_simple_fill_tool", None)
+    if fill is None:
+        return None
+    idx = max(0, min(fill.active_palette_index, len(prefs.palettes) - 1))
+    return prefs.palettes[idx]
 
 
 def cleanup_previews():
@@ -106,30 +113,39 @@ def cleanup_previews():
 
 
 @bpy.app.handlers.persistent
-def _assign_default_palettes(_=None):
-    """Assign default palette to tools that don't have one set.
+def _ensure_library(_=None):
+    """Make sure at least the default palette exists and tool indices are valid.
 
     Registered as a load_post handler and called once from register().
     """
+    prefs = get_prefs()
+    if prefs is None:
+        return
+
+    if len(prefs.palettes) == 0:
+        pal = prefs.palettes.add()
+        pal.name = DEFAULT_PALETTE_NAME
+        for color in _DEFAULT_COLORS:
+            sw = pal.swatches.add()
+            sw.color = (color[0], color[1], color[2], 1.0)
+
+    last = len(prefs.palettes) - 1
     scene = bpy.context.scene
-    palette = get_or_create_default_palette()
-
-    fill_tool = getattr(scene, "hue_simple_fill_tool", None)
-    if fill_tool and not fill_tool.preset_palette:
-        fill_tool.preset_palette = palette
-
+    fill = getattr(scene, "hue_simple_fill_tool", None)
+    if fill is not None and fill.active_palette_index > last:
+        fill.active_palette_index = 0
     random_tool = getattr(scene, "hue_random_color_tool", None)
-    if random_tool and not random_tool.random_palette:
-        random_tool.random_palette = palette
+    if random_tool is not None and random_tool.random_palette_index > last:
+        random_tool.random_palette_index = 0
 
 
 def register_handlers():
-    """Register load_post handler and schedule initial assignment."""
-    bpy.app.handlers.load_post.append(_assign_default_palettes)
-    bpy.app.timers.register(_assign_default_palettes, first_interval=0)
+    """Register load_post handler and schedule initial library check."""
+    bpy.app.handlers.load_post.append(_ensure_library)
+    bpy.app.timers.register(_ensure_library, first_interval=0)
 
 
 def unregister_handlers():
     """Remove load_post handler."""
-    if _assign_default_palettes in bpy.app.handlers.load_post:
-        bpy.app.handlers.load_post.remove(_assign_default_palettes)
+    if _ensure_library in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_ensure_library)

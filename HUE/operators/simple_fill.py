@@ -5,7 +5,7 @@
 
 import bpy
 
-from ..utilities.palette_utilities import DEFAULT_PALETTE_NAME
+from ..utilities.palette_utilities import get_active_fill_palette, get_prefs
 from ..utilities.color_utilities import (
     apply_mask_constant, bulk_get_colors, bulk_set_colors,
     ensure_object_mode, get_active_color_attribute, get_selected_color_indices,
@@ -35,7 +35,12 @@ def execute_simple_fill(context):
     global_color_settings = scene.hue_global_color_settings
     simple_fill_tool = scene.hue_simple_fill_tool
     mask = global_color_settings.get_mask()
-    color = simple_fill_tool.selected_color
+    # In Linear mode the fill value is the linear picker (written straight to the
+    # linear channel by bulk_set_colors); in sRGB mode it is the gamma picker.
+    if global_color_settings.use_srgb():
+        color = simple_fill_tool.selected_color
+    else:
+        color = simple_fill_tool.selected_color_linear
     select_mode = context.tool_settings.mesh_select_mode if context.mode == 'EDIT_MESH' else None
 
     for obj in context.selected_objects:
@@ -65,62 +70,57 @@ class HUE_OT_simple_fill(BaseColorOperator):
 
 
 class HUE_OT_add_preset_color(BaseOperator):
-    """Saves the current active color as a new color preset"""
+    """Saves the current active color as a new swatch in the active palette"""
 
     bl_label = "Add Preset Color"
     bl_idname = "hue.add_preset_color"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        simple_fill_tool = context.scene.hue_simple_fill_tool
-        palette = simple_fill_tool.preset_palette
-        if not palette:
-            palette = bpy.data.palettes.get("HUE_SimpleFillPresets")
-            if not palette:
-                palette = bpy.data.palettes.new("HUE_SimpleFillPresets")
-            simple_fill_tool.preset_palette = palette
-        color = simple_fill_tool.selected_color
-        new_color = palette.colors.new()
-        new_color.color = (color[0], color[1], color[2])
-        simple_fill_tool.active_preset_index = len(palette.colors) - 1
+        pal = get_active_fill_palette(context.scene)
+        if pal is None:
+            self.report({"WARNING"}, "No palette selected")
+            return {"CANCELLED"}
+        color = context.scene.hue_simple_fill_tool.selected_color
+        sw = pal.swatches.add()
+        sw.color = (color[0], color[1], color[2], color[3])
+        pal.active_swatch_index = len(pal.swatches) - 1
         return {"FINISHED"}
 
 
 class HUE_OT_remove_preset_color(BaseOperator):
-    """Removes the currently selected color preset"""
+    """Removes the currently selected swatch from the active palette"""
 
     bl_label = "Remove Preset Color"
     bl_idname = "hue.remove_preset_color"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        simple_fill_tool = context.scene.hue_simple_fill_tool
-        palette = simple_fill_tool.preset_palette
-        if not palette or len(palette.colors) == 0:
+        pal = get_active_fill_palette(context.scene)
+        if pal is None or len(pal.swatches) == 0:
             self.report({"WARNING"}, "No preset colors to remove")
             return {"CANCELLED"}
-        idx = simple_fill_tool.active_preset_index
-        idx = min(idx, len(palette.colors) - 1)
-        palette.colors.remove(palette.colors[idx])
-        if len(palette.colors) > 0:
-            simple_fill_tool.active_preset_index = min(idx, len(palette.colors) - 1)
-        else:
-            simple_fill_tool.active_preset_index = 0
+        idx = min(pal.active_swatch_index, len(pal.swatches) - 1)
+        pal.swatches.remove(idx)
+        pal.active_swatch_index = min(idx, len(pal.swatches) - 1) if len(pal.swatches) else 0
         return {"FINISHED"}
 
 
 class HUE_OT_new_palette(BaseOperator):
-    """Creates a new color palette"""
+    """Creates a new palette in the persistent library"""
 
     bl_label = "New Palette"
     bl_idname = "hue.new_palette"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        palette = bpy.data.palettes.new("Palette")
-        tool = context.scene.hue_simple_fill_tool
-        tool.preset_palette = palette
-        tool.active_preset_index = 0
+        prefs = get_prefs()
+        if prefs is None:
+            self.report({"ERROR"}, "Add-on preferences unavailable")
+            return {"CANCELLED"}
+        prefs.palettes.add().name = "Palette"
+        # Selecting the new palette also applies its (default) mask.
+        context.scene.hue_simple_fill_tool.active_palette_index = len(prefs.palettes) - 1
         return {"FINISHED"}
 
 
@@ -134,32 +134,29 @@ class HUE_OT_rename_palette(BaseOperator):
     new_name: bpy.props.StringProperty(name="Name")
 
     def invoke(self, context, event):
-        palette = context.scene.hue_simple_fill_tool.preset_palette
-        if not palette:
+        pal = get_active_fill_palette(context.scene)
+        if pal is None:
             self.report({"WARNING"}, "No palette selected")
             return {"CANCELLED"}
-        if palette.name == DEFAULT_PALETTE_NAME:
-            self.report({"WARNING"}, "Cannot rename the default palette!")
-            return {"CANCELLED"}
-        self.new_name = palette.name
+        self.new_name = pal.name
         return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, context):
         self.layout.prop(self, "new_name", text="")
 
     def execute(self, context):
-        palette = context.scene.hue_simple_fill_tool.preset_palette
-        if not palette:
+        pal = get_active_fill_palette(context.scene)
+        if pal is None:
             return {"CANCELLED"}
         if not self.new_name.strip():
             self.report({"WARNING"}, "Name cannot be empty")
             return {"CANCELLED"}
-        palette.name = self.new_name.strip()
+        pal.name = self.new_name.strip()
         return {"FINISHED"}
 
 
 class HUE_OT_delete_palette(BaseOperator):
-    """Deletes the currently selected palette"""
+    """Deletes the currently selected palette from the library"""
 
     bl_label = "Delete Palette"
     bl_idname = "hue.delete_palette"
@@ -168,30 +165,80 @@ class HUE_OT_delete_palette(BaseOperator):
     palette_name: bpy.props.StringProperty(options={'SKIP_SAVE'})
 
     def invoke(self, context, event):
-        palette = context.scene.hue_simple_fill_tool.preset_palette
-        if not palette:
+        prefs = get_prefs()
+        if prefs is None or len(prefs.palettes) == 0:
             self.report({"WARNING"}, "No palette selected")
             return {"CANCELLED"}
-        if palette.name == DEFAULT_PALETTE_NAME:
-            self.report({"WARNING"}, "Cannot delete the default palette!")
+        if len(prefs.palettes) <= 1:
+            self.report({"WARNING"}, "Cannot delete the last palette!")
             return {"CANCELLED"}
-        self.palette_name = palette.name
+        self.palette_name = get_active_fill_palette(context.scene).name
         return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, context):
         self.layout.label(text=f"Delete \"{self.palette_name}\" palette?")
 
     def execute(self, context):
+        prefs = get_prefs()
         tool = context.scene.hue_simple_fill_tool
-        palette = tool.preset_palette
-        if not palette:
-            self.report({"WARNING"}, "No palette selected")
+        if prefs is None or len(prefs.palettes) <= 1:
+            self.report({"WARNING"}, "Cannot delete the last palette!")
             return {"CANCELLED"}
-        if palette.name == DEFAULT_PALETTE_NAME:
-            self.report({"WARNING"}, "Cannot delete the default palette!")
+        idx = max(0, min(tool.active_palette_index, len(prefs.palettes) - 1))
+        prefs.palettes.remove(idx)
+        # Re-select (clamped) — also re-applies the mask of the new active palette.
+        tool.active_palette_index = min(idx, len(prefs.palettes) - 1)
+        return {"FINISHED"}
+
+
+class HUE_OT_select_palette(BaseOperator):
+    """Makes this the active palette and applies its channel mask"""
+
+    warn_visibility_check = False
+
+    bl_label = "Select Palette"
+    bl_idname = "hue.select_palette"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    index: bpy.props.IntProperty()
+
+    def execute(self, context):
+        prefs = get_prefs()
+        if prefs is None or not (0 <= self.index < len(prefs.palettes)):
             return {"CANCELLED"}
-        tool.preset_palette = None
-        bpy.data.palettes.remove(palette)
+        # Assigning the index triggers the mask sync via its update callback.
+        context.scene.hue_simple_fill_tool.active_palette_index = self.index
+        return {"FINISHED"}
+
+
+class HUE_OT_edit_swatch_description(BaseOperator):
+    """Edit the description shown when hovering this swatch"""
+
+    warn_visibility_check = False
+
+    bl_label = "Edit Swatch Description"
+    bl_idname = "hue.edit_swatch_description"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    index: bpy.props.IntProperty()
+    description_text: bpy.props.StringProperty(name="Description")
+
+    def invoke(self, context, event):
+        pal = get_active_fill_palette(context.scene)
+        if pal is None or not (0 <= self.index < len(pal.swatches)):
+            self.report({"WARNING"}, "No swatch selected")
+            return {"CANCELLED"}
+        self.description_text = pal.swatches[self.index].description
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        self.layout.prop(self, "description_text", text="")
+
+    def execute(self, context):
+        pal = get_active_fill_palette(context.scene)
+        if pal is None or not (0 <= self.index < len(pal.swatches)):
+            return {"CANCELLED"}
+        pal.swatches[self.index].description = self.description_text
         return {"FINISHED"}
 
 
@@ -206,16 +253,24 @@ class HUE_OT_use_preset_color(BaseOperator):
 
     index: bpy.props.IntProperty()
 
+    @classmethod
+    def description(cls, context, properties):
+        pal = get_active_fill_palette(context.scene)
+        if pal is not None and 0 <= properties.index < len(pal.swatches):
+            note = pal.swatches[properties.index].description
+            if note:
+                return note
+        return "Set this preset as the active color"
+
     def execute(self, context):
         simple_fill_tool = context.scene.hue_simple_fill_tool
-        palette = simple_fill_tool.preset_palette
-        if not palette or self.index >= len(palette.colors):
+        pal = get_active_fill_palette(context.scene)
+        if pal is None or self.index >= len(pal.swatches):
             return {"CANCELLED"}
-        color = palette.colors[self.index].color
-        simple_fill_tool.selected_color[0] = color[0]
-        simple_fill_tool.selected_color[1] = color[1]
-        simple_fill_tool.selected_color[2] = color[2]
-        simple_fill_tool.active_preset_index = self.index
+        color = pal.swatches[self.index].color
+        # Full-tuple assignment keeps the sRGB/linear view mirror in sync.
+        simple_fill_tool.selected_color = (color[0], color[1], color[2], color[3])
+        pal.active_swatch_index = self.index
 
         if simple_fill_tool.quick_fill:
             success, msg = execute_simple_fill(context)

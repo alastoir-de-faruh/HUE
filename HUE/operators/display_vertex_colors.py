@@ -4,153 +4,259 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import bpy
+import numpy as np
 
 from .base_operators import BaseOperator
 from ..ui.settings_panel.display_settings_panel import HUE_PT_display_settings_panel
+from ..utilities.color_utilities import (
+    bulk_get_colors, bulk_set_colors, get_active_color_attribute,
+)
 
 
-# Display modes rendered through a single-channel display material.
-# Maps the mode id to the socket produced by the channel-splitting graph.
-_CHANNEL_MODES = {"R", "G", "B", "Alpha"}
+# Single-channel display modes and the channel index they read.
+_CHANNEL_INDEX = {"R": 0, "G": 1, "B": 2, "Alpha": 3}
+_CHANNEL_MODES = set(_CHANNEL_INDEX)
+
+# Guard so the temp-attribute write inside the depsgraph handler doesn't make
+# the handler re-enter itself.
+_syncing = False
+# obj_name -> checksum of the source channel data last written to the temp
+# attribute. Lets the live handler skip no-op writes and avoid a feedback loop.
+_sync_cache = {}
 
 
 def update_display(context):
     """Core display-mode logic, callable without an operator instance."""
     settings = context.scene.hue_display_settings
-
     mode = settings.display_mode
+
     if mode == "Off":
-        _hide_vertex_colors(context)
-    elif mode == "RGB":
-        _display_vertex_colors_as_rgb(context)
+        _deactivate(context)
+        return
+
+    _activate_shading(context)
+    if mode == "RGB":
+        _teardown_channel_preview(context)
     elif mode in _CHANNEL_MODES:
-        _display_vertex_colors_as_channel(context, mode)
+        _setup_channel_preview(context, mode)
+    _set_vertex_shading(context)
 
 
-def _hide_vertex_colors(context):
-    _restore_scene_shading_settings(context)
-    _remove_alpha_display_material_from_all_mesh_objects(context)
+# ---------------------------------------------------------------------------
+# Shading state
+# ---------------------------------------------------------------------------
 
-
-def _display_vertex_colors_as_rgb(context):
-    _save_scene_shading_settings(context)
-    _remove_alpha_display_material_from_all_mesh_objects(context)
-
-    context.space_data.shading.type = "SOLID"
-    context.space_data.shading.color_type = "VERTEX"
-    context.space_data.shading.light = "FLAT"
-
-
-def _display_vertex_colors_as_channel(context, channel):
-    _restore_scene_shading_settings(context)
-
-    _remove_alpha_display_material_from_all_mesh_objects(context)
-    _apply_channel_display_material_to_active_mesh_object(context, channel)
-
-    context.space_data.shading.type = "MATERIAL"
-
-
-def _save_scene_shading_settings(context):
+def _activate_shading(context):
+    """Save the viewport shading once, when first entering a HUE display mode."""
     settings = context.scene.hue_display_settings
+    if settings.display_active:
+        return
+    shading = context.space_data.shading
+    settings.previous_shading_type = shading.type
+    settings.previous_color_type = shading.color_type
+    settings.previous_light_type = shading.light
+    settings.display_active = True
 
-    settings.previous_shading_type = context.space_data.shading.type
-    settings.previous_color_type = context.space_data.shading.color_type
-    settings.previous_light_type = context.space_data.shading.light
+
+def _set_vertex_shading(context):
+    shading = context.space_data.shading
+    shading.type = "SOLID"
+    shading.color_type = "VERTEX"
+    shading.light = "FLAT"
 
 
-def _restore_scene_shading_settings(context):
+def _deactivate(context):
+    """Leave every HUE display mode: restore attributes and shading."""
     settings = context.scene.hue_display_settings
+    _teardown_channel_preview(context)
+    if settings.display_active:
+        shading = context.space_data.shading
+        shading.type = settings.previous_shading_type
+        shading.color_type = settings.previous_color_type
+        shading.light = settings.previous_light_type
+        settings.display_active = False
 
-    context.space_data.shading.type = settings.previous_shading_type
-    context.space_data.shading.color_type = settings.previous_color_type
-    context.space_data.shading.light = settings.previous_light_type
+
+# ---------------------------------------------------------------------------
+# Channel preview (temporary render color attribute, no material)
+# ---------------------------------------------------------------------------
+
+def _color_attr_index(color_attributes, attr):
+    for i, a in enumerate(color_attributes):
+        if a == attr:
+            return i
+    return -1
 
 
-# Separate Color node output socket per channel.
-_CHANNEL_OUTPUTS = {"R": "Red", "G": "Green", "B": "Blue"}
+def _set_render_color(color_attributes, attr):
+    """Set the render color attribute (what Solid shading displays)."""
+    try:
+        idx = _color_attr_index(color_attributes, attr)
+        if idx >= 0:
+            color_attributes.render_color_index = idx
+    except (AttributeError, TypeError):
+        try:
+            color_attributes.render_color_name = attr.name
+        except (AttributeError, TypeError):
+            pass
 
 
-def _get_or_create_channel_display_material(context, channel):
-    """Build (or rebuild) the single-channel display material.
+def _set_active_color(color_attributes, attr):
+    """Set the active color attribute (what painting and tools target)."""
+    try:
+        color_attributes.active_color = attr
+    except (AttributeError, TypeError):
+        try:
+            color_attributes.active_color_index = _color_attr_index(color_attributes, attr)
+        except (AttributeError, TypeError):
+            pass
 
-    The node graph is always rebuilt so the material reflects the currently
-    requested *channel* ("R", "G", "B" or "Alpha") and the active object's
-    color attribute.
+
+def _write_channel(temp_attr, source_attr, channel):
+    """Fill *temp_attr* with grayscale = source's *channel*, and cache it."""
+    src = bulk_get_colors(source_attr)
+    ch = _CHANNEL_INDEX[channel]
+    gray = np.ascontiguousarray(src[:, ch])
+    out = np.empty_like(src)
+    out[:, 0] = gray
+    out[:, 1] = gray
+    out[:, 2] = gray
+    out[:, 3] = 1.0
+    bulk_set_colors(temp_attr, out)
+    return hash(gray.tobytes())
+
+
+def _setup_channel_preview(context, channel):
+    """Show *channel* as grayscale on the active mesh via a temp render attribute.
+
+    The user's own color attribute stays the *active* one (so painting and the
+    HUE tools keep targeting it); the temporary grayscale attribute is only set
+    as the *render* color attribute, which is what Solid shading displays.
     """
     settings = context.scene.hue_display_settings
-    material_name = settings.alpha_display_material_name
-
-    material = bpy.data.materials.get(material_name)
-    if material is None:
-        material = bpy.data.materials.new(name=material_name)
-
-    material.use_nodes = True
-    nodes = material.node_tree.nodes
-    links = material.node_tree.links
-
-    for node in nodes:
-        nodes.remove(node)
-
-    material_output = nodes.new(type="ShaderNodeOutputMaterial")
-    color_attribute_node = nodes.new(type="ShaderNodeVertexColor")
-    color_attribute_node.name = "Color Attribute"
-    color_attribute_node.location = (-500, 0)
-
-    color_attribute_layer_name = "Color"
-
-    if context.active_object is not None:
-        obj = context.active_object
-        if obj.data.color_attributes.active_color is not None:
-            color_attribute_layer_name = obj.data.color_attributes.active_color.name
-
-    color_attribute_node.layer_name = color_attribute_layer_name
-
-    if channel == "Alpha":
-        links.new(color_attribute_node.outputs["Alpha"], material_output.inputs["Surface"])
-    else:
-        separate_node = nodes.new(type="ShaderNodeSeparateColor")
-        separate_node.location = (-250, 0)
-        links.new(color_attribute_node.outputs["Color"], separate_node.inputs["Color"])
-        links.new(
-            separate_node.outputs[_CHANNEL_OUTPUTS[channel]],
-            material_output.inputs["Surface"],
-        )
-
-    return material
-
-
-def _apply_channel_display_material_to_active_mesh_object(context, channel):
-    display_material = _get_or_create_channel_display_material(context, channel)
-
-    settings = context.scene.hue_display_settings
-    material_name = settings.alpha_display_material_name
-
     obj = context.active_object
+    if obj is None or obj.type != "MESH":
+        return
 
-    if obj is not None and obj.type == "MESH":
-        obj.data.materials.append(display_material)
+    color_attributes = obj.data.color_attributes
+    temp_name = settings.channel_preview_attr
 
-        mat_index = obj.data.materials.find(material_name)
-        obj.active_material_index = mat_index
-        obj.active_material = display_material
+    # Reuse the captured source if this object is already being previewed;
+    # otherwise tear down any previous preview and capture the current source.
+    if settings.channel_preview_object == obj.name and settings.channel_preview_source:
+        source = color_attributes.get(settings.channel_preview_source)
+    else:
+        _teardown_channel_preview(context)
+        source = color_attributes.active_color or get_active_color_attribute(obj)
+        color_attributes = obj.data.color_attributes
+        settings.channel_preview_source = source.name
+        settings.channel_preview_object = obj.name
 
-        # Assign material to all faces via mesh data API
-        for poly in obj.data.polygons:
-            poly.material_index = mat_index
-        obj.data.update()
+    if source is None or source.name == temp_name:
+        return
+
+    temp = color_attributes.get(temp_name)
+    if temp is not None and (temp.domain != source.domain or temp.data_type != source.data_type):
+        color_attributes.remove(temp)
+        temp = None
+    if temp is None:
+        temp = color_attributes.new(name=temp_name, type=source.data_type, domain=source.domain)
+
+    _sync_cache[obj.name] = _write_channel(temp, source, channel)
+
+    # Solid shading displays the *active* color attribute, so the temp grayscale
+    # attribute must be the active one. HUE tools are redirected back to the real
+    # source by get_active_color_attribute(), so edits still land on the source
+    # and the depsgraph handler keeps this preview live.
+    _set_active_color(color_attributes, temp)
+    _set_render_color(color_attributes, temp)
 
 
-def _remove_alpha_display_material_from_all_mesh_objects(context):
+def _teardown_channel_preview(context):
+    """Remove the temp attribute everywhere and restore the source as render."""
     settings = context.scene.hue_display_settings
-    material_name = settings.alpha_display_material_name
+    temp_name = settings.channel_preview_attr
+    src_name = settings.channel_preview_source
+    obj_name = settings.channel_preview_object
 
     for obj in context.scene.objects:
-        if obj.type == "MESH":
-            for slot in obj.material_slots:
-                if slot.material and slot.material.name == material_name:
-                    obj.data.materials.pop(index=obj.material_slots.find(material_name))
-                    break
+        if obj.type != "MESH":
+            continue
+        color_attributes = obj.data.color_attributes
+        temp = color_attributes.get(temp_name)
+        if temp is not None:
+            color_attributes.remove(temp)
+        if obj.name == obj_name and src_name:
+            source = color_attributes.get(src_name)
+            if source is not None:
+                _set_active_color(color_attributes, source)
+                _set_render_color(color_attributes, source)
 
+    settings.channel_preview_source = ""
+    settings.channel_preview_object = ""
+    _sync_cache.clear()
+
+
+# ---------------------------------------------------------------------------
+# Live update handler
+# ---------------------------------------------------------------------------
+
+@bpy.app.handlers.persistent
+def _channel_preview_sync(scene, depsgraph=None):
+    """Re-derive the temp grayscale attribute whenever its source changes."""
+    global _syncing
+    if _syncing:
+        return
+    settings = getattr(scene, "hue_display_settings", None)
+    if settings is None or settings.display_mode not in _CHANNEL_MODES:
+        return
+
+    obj = bpy.data.objects.get(settings.channel_preview_object)
+    if obj is None or obj.type != "MESH":
+        return
+
+    color_attributes = obj.data.color_attributes
+    source = color_attributes.get(settings.channel_preview_source)
+    temp = color_attributes.get(settings.channel_preview_attr)
+    if source is None or temp is None or source == temp:
+        return
+
+    try:
+        src = bulk_get_colors(source)
+        gray = np.ascontiguousarray(src[:, _CHANNEL_INDEX[settings.display_mode]])
+        checksum = hash(gray.tobytes())
+        if _sync_cache.get(obj.name) == checksum:
+            return  # Source unchanged — skip the write (and the feedback loop).
+        _sync_cache[obj.name] = checksum
+
+        out = np.empty_like(src)
+        out[:, 0] = gray
+        out[:, 1] = gray
+        out[:, 2] = gray
+        out[:, 3] = 1.0
+
+        _syncing = True
+        bulk_set_colors(temp, out)
+        obj.data.update()
+    except (ReferenceError, RuntimeError):
+        pass
+    finally:
+        _syncing = False
+
+
+def add_depsgraph_handler():
+    if _channel_preview_sync not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(_channel_preview_sync)
+
+
+def remove_depsgraph_handler():
+    if _channel_preview_sync in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(_channel_preview_sync)
+
+
+# ---------------------------------------------------------------------------
+# Operators
+# ---------------------------------------------------------------------------
 
 class HUE_OT_display_vertex_colors(BaseOperator):
     """Toggles vertex color display mode in the viewport"""

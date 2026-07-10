@@ -29,6 +29,12 @@ class HUE_PT_global_color_settings_panel(BasePanelInfo, Panel):
 
         layout.separator()
 
+        col = layout.column(align=True)
+        col.label(text="Color space (read/write):", icon="IMAGE_RGB")
+        col.prop(tool, "color_space", expand=True)
+
+        layout.separator()
+
         # Reset Vertex Colors
         row = layout.row()
         row.operator("hue.reset_vertex_colors", icon="TRASH")

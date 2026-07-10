@@ -3,12 +3,31 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-from bpy.types import Panel
+from bpy.types import Menu, Panel
 
 from ..base_panel_info import BasePanelInfo
-from ...utilities.palette_utilities import (
-    SWATCH_COLS, ensure_palette_assigned, get_color_icon,
-)
+from ...utilities.palette_utilities import SWATCH_COLS, get_color_icon, get_prefs
+
+
+class HUE_MT_random_palette_select(Menu):
+    """Dropdown listing every palette in the persistent library."""
+
+    bl_idname = "HUE_MT_random_palette_select"
+    bl_label = "Select Palette"
+
+    def draw(self, context):
+        layout = self.layout
+        prefs = get_prefs()
+        if prefs is None or len(prefs.palettes) == 0:
+            layout.label(text="No palettes")
+            return
+        for i, pal in enumerate(prefs.palettes):
+            op = layout.operator(
+                "hue.select_random_palette",
+                text=f"{pal.name}  [{pal.mask_label()}]",
+                icon="COLOR",
+            )
+            op.index = i
 
 
 class HUE_PT_random_color_tool_panel(BasePanelInfo, Panel):
@@ -50,22 +69,28 @@ class HUE_PT_random_color_tool_panel(BasePanelInfo, Panel):
         row.prop(random_color_tool, "color_mode", expand=True)
 
         if random_color_tool.color_mode == "Palette":
-            ensure_palette_assigned(random_color_tool, "random_palette")
-            # Swatches follow the Fill tool's color-space view aid so palettes
-            # read consistently across the whole HUE editor.
-            color_space = context.scene.hue_simple_fill_tool.color_space
+            prefs = get_prefs()
+            idx = random_color_tool.random_palette_index
+            pal = prefs.palettes[idx] if prefs and 0 <= idx < len(prefs.palettes) else None
+            # Swatches follow the global color-space setting so palettes read
+            # consistently across the whole HUE editor.
+            color_space = context.scene.hue_global_color_settings.color_space
+
             box = layout.box()
             box.label(text="Palette", icon="COLOR")
             row = box.row(align=True)
-            row.prop(random_color_tool, "random_palette", text="")
+            row.menu(
+                "HUE_MT_random_palette_select",
+                text=pal.name if pal else "No palette",
+                icon="COLOR",
+            )
 
-            palette = random_color_tool.random_palette
-            if palette and len(palette.colors) > 0:
-                for i, pc in enumerate(palette.colors):
+            if pal and len(pal.swatches) > 0:
+                for i, sw in enumerate(pal.swatches):
                     if i % SWATCH_COLS == 0:
                         row = box.row(align=True)
                         row.alignment = 'LEFT'
-                    icon_id = get_color_icon(*pc.color, color_space=color_space)
+                    icon_id = get_color_icon(*sw.color[:3], color_space=color_space)
                     row.label(text="", icon_value=icon_id)
 
         row = layout.row()
