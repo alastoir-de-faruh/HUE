@@ -35,7 +35,12 @@ def execute_simple_fill(context):
     global_color_settings = scene.hue_global_color_settings
     simple_fill_tool = scene.hue_simple_fill_tool
     mask = global_color_settings.get_mask()
-    color = simple_fill_tool.selected_color
+    # In Linear mode the fill value is the linear picker (written straight to the
+    # linear channel by bulk_set_colors); in sRGB mode it is the gamma picker.
+    if global_color_settings.use_srgb():
+        color = simple_fill_tool.selected_color
+    else:
+        color = simple_fill_tool.selected_color_linear
     select_mode = context.tool_settings.mesh_select_mode if context.mode == 'EDIT_MESH' else None
 
     for obj in context.selected_objects:

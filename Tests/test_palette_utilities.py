@@ -85,11 +85,15 @@ class TestGetColorIcon(unittest.TestCase):
         icon_id = get_color_icon(2.0, -0.5, 0.5)
         self.assertIsInstance(icon_id, int)
 
-    def test_linear_space_differs_from_srgb(self):
-        # The color-space view aid should render a mid value differently.
-        srgb_id = get_color_icon(0.5, 0.5, 0.5, color_space="sRGB")
-        linear_id = get_color_icon(0.5, 0.5, 0.5, color_space="LINEAR")
-        self.assertNotEqual(srgb_id, linear_id)
+    def test_linear_space_uses_distinct_swatch(self):
+        # The color-space view aid renders a mid value to a different swatch;
+        # icon ids are 0 in headless, so compare the generated cache entries.
+        from utilities.palette_utilities import _preset_previews
+        cleanup_previews()
+        get_color_icon(0.5, 0.5, 0.5, color_space="sRGB")
+        get_color_icon(0.5, 0.5, 0.5, color_space="LINEAR")
+        pcoll = _preset_previews["main"]
+        self.assertEqual(len(pcoll.keys()), 2)
 
 
 if __name__ == "__main__":

@@ -41,13 +41,14 @@ class HUE_PT_simple_fill_tool_panel(BasePanelInfo, Panel):
     def draw(self, context):
         layout = self.layout
         tool = context.scene.hue_simple_fill_tool
+        gcs = context.scene.hue_global_color_settings
 
         # --- Active color + apply button ---
         box = layout.box()
         box.label(text="Active Color", icon="BRUSH_DATA")
-        box.prop(tool, "color_space", expand=True)
+        box.prop(gcs, "color_space", expand=True)
         row = box.row(align=True)
-        if tool.color_space == "LINEAR":
+        if gcs.color_space == "LINEAR":
             row.prop(tool, "selected_color_linear", text="")
         else:
             row.prop(tool, "selected_color", text="")
@@ -86,7 +87,7 @@ class HUE_PT_simple_fill_tool_panel(BasePanelInfo, Panel):
                     if i % SWATCH_COLS == 0:
                         row = box.row(align=True)
                         row.alignment = 'LEFT'
-                    icon_id = get_color_icon(*sw.color[:3], color_space=tool.color_space)
+                    icon_id = get_color_icon(*sw.color[:3], color_space=gcs.color_space)
                     op = row.operator(
                         "hue.use_preset_color",
                         text="",

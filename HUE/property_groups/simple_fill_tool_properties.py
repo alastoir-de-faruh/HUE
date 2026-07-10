@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 from bpy.props import (
-    BoolProperty, EnumProperty, FloatVectorProperty, IntProperty,
+    BoolProperty, FloatVectorProperty, IntProperty,
 )
 from bpy.types import PropertyGroup
 
@@ -65,20 +65,6 @@ def _sync_from_linear(self, context):
 
 
 class SimpleFillToolProperties(PropertyGroup):
-    color_space: EnumProperty(
-        name="Color Space",
-        description=(
-            "How the active color and palette swatches are displayed. This is "
-            "a view aid only — it changes neither the stored color nor the "
-            "color applied to the mesh"
-        ),
-        items=[
-            ("sRGB", "sRGB", "Show the values interpreted as sRGB (gamma) space"),
-            ("LINEAR", "Linear", "Show the same values interpreted as Linear RGB"),
-        ],
-        default="sRGB",
-    )
-
     selected_color: FloatVectorProperty(
         name="Color",
         description="Choose a color (sRGB)",

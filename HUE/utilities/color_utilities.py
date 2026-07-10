@@ -149,17 +149,31 @@ def get_distinct_random_colors(count, mode="RGBA", palette=None, min_distance=0.
 
 # ---- Numpy bulk I/O ----
 
+def _color_slot():
+    """Attribute channel HUE reads/writes, per the global color-space setting.
+
+    "color_srgb" (gamma-encoded) by default; "color" (raw linear) when the
+    global color space is Linear, so shaders read authored values 1:1.
+    """
+    try:
+        if not bpy.context.scene.hue_global_color_settings.use_srgb():
+            return "color"
+    except AttributeError:
+        pass
+    return "color_srgb"
+
+
 def bulk_get_colors(color_attribute):
-    """Fetch all sRGB colors as a (N, 4) float32 numpy array."""
+    """Fetch all colors as a (N, 4) float32 numpy array (slot per color space)."""
     n = len(color_attribute.data)
     flat = np.empty(n * 4, dtype=np.float32)
-    color_attribute.data.foreach_get("color_srgb", flat)
+    color_attribute.data.foreach_get(_color_slot(), flat)
     return flat.reshape(n, 4)
 
 
 def bulk_set_colors(color_attribute, colors):
-    """Write a (N, 4) float32 numpy array back to color data."""
-    color_attribute.data.foreach_set("color_srgb", colors.ravel())
+    """Write a (N, 4) float32 numpy array back to color data (slot per color space)."""
+    color_attribute.data.foreach_set(_color_slot(), colors.ravel())
 
 
 # ---- Numpy mask helpers ----

@@ -72,9 +72,9 @@ class HUE_PT_random_color_tool_panel(BasePanelInfo, Panel):
             prefs = get_prefs()
             idx = random_color_tool.random_palette_index
             pal = prefs.palettes[idx] if prefs and 0 <= idx < len(prefs.palettes) else None
-            # Swatches follow the Fill tool's color-space view aid so palettes
-            # read consistently across the whole HUE editor.
-            color_space = context.scene.hue_simple_fill_tool.color_space
+            # Swatches follow the global color-space setting so palettes read
+            # consistently across the whole HUE editor.
+            color_space = context.scene.hue_global_color_settings.color_space
 
             box = layout.box()
             box.label(text="Palette", icon="COLOR")
